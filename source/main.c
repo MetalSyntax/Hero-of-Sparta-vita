@@ -70,58 +70,136 @@ static int (* nativeCanInterrupt)(JNIEnv *env, jobject obj);
  * tecla y todo lo jugable se inyecta como toques sobre los controles del HUD. */
 #define AKEYCODE_MENU 82
 
-/* IDs de puntero para los toques sintéticos (el motor tiene 10 slots que asigna
- * por ID, Main::getTouchIdx); 0 queda para el dedo real. */
-#define TOUCH_ID_JOY    5
-#define TOUCH_ID_SWORD  6
-#define TOUCH_ID_SHIELD 7
+/* IDs de puntero para los toques sintéticos: el motor asigna sus 10 slots por ID
+ * (Main::getTouchIdx), así que van lejos de los IDs de los dedos reales (0-63). */
+#define TOUCH_ID_JOY    100
+#define TOUCH_ID_SWORD  101
+#define TOUCH_ID_SHIELD 102
+#define TOUCH_ID_KILL   103
+#define TOUCH_ID_CLOSE  104
 
-/* Botones del HUD en el espacio 1280x752 del motor (medidos sobre captura). */
-#define SWORD_X  1127
-#define SWORD_Y  516
-#define SHIELD_X 1016
-#define SHIELD_Y 639
+/* Niveles GUI y zonas táctiles (ítems tipo 5) leídos del motor en vivo; números
+ * confirmados con el log de zonas (`[hud] nivel N zona M`). */
+#define GUI_HUD           3  /* HUD de juego (GameGUI::PaintIGNormal) */
+#define GUI_INFOBOX       13 /* cuadro de texto (UpdateInfoBox: CheckActions(.., 0xd, 0)) */
+#define ZONE_FOCUSED_KILL 2  /* tecla 25, botón de ShowFatalityButton */
+#define ZONE_SHIELD       4  /* tecla 0 */
+#define ZONE_SWORD        6  /* tecla 16 */
+#define ZONE_INFOBOX_OK   0  /* la ✕ del cuadro de texto */
+
 /* Desplazamiento del joystick: debe quedar dentro del radio de 100 px con que
  * Main::ProcessJoystick acepta el toque. */
 #define JOY_RADIUS 60
 #define STICK_DEADZONE 32
 
-#define TOUCH_ID_KILL   8
-/* Zona táctil del botón de focused kill (ShowFatalityButton muestra 12 y 20). */
-#define KILL_AREA_ITEM  12
-
 static uintptr_t *p_canvas; /* &m_canvas del .so (Main*) */
 
-int hud_area_center(uintptr_t gui, int item, int *x, int *y); /* patch.c */
-static void touch(int id, int type, int x, int y);
-
-/* TRIANGLE -> toque sobre el centro real de la zona del botón de focused kill. */
-static void pad_kill(unsigned pressed, unsigned released) {
-    static int kx, ky, down;
-    uintptr_t gui;
-    if ((pressed & SCE_CTRL_TRIANGLE) && p_canvas && *p_canvas &&
-        (gui = *(uintptr_t *)(*p_canvas + 0x374)) &&
-        hud_area_center(gui, KILL_AREA_ITEM, &kx, &ky)) {
-        touch(TOUCH_ID_KILL, 1, kx, ky);
-        down = 1;
-    }
-    if ((released & SCE_CTRL_TRIANGLE) && down) {
-        touch(TOUCH_ID_KILL, 0, kx, ky);
-        down = 0;
-    }
-}
+int hud_area_center(uintptr_t gui, int level, int item, int *x, int *y); /* patch.c */
+void hud_dump_areas(uintptr_t gui, int level);
 
 static void touch(int id, int type, int x, int y) {
     if (nativeOnTouch)
         nativeOnTouch(&jni, NULL, id, type, x, y);
 }
 
-/* Botón físico -> toque mantenido sobre un botón del HUD. */
-static void pad_button(unsigned pressed, unsigned released, unsigned btn, int id, int x, int y) {
-    if (pressed & btn)
-        touch(id, 1, x, y);
-    if (released & btn)
-        touch(id, 0, x, y);
+static uintptr_t cur_gui(void) {
+    return (p_canvas && *p_canvas) ? *(uintptr_t *)(*p_canvas + 0x374) : 0;
+}
+
+/* Botón físico -> toque mantenido en el centro de una zona táctil del GUI. */
+static int zone_pos[8][2];
+static unsigned zone_held;
+
+static void zone_down(int id, int level, int zone) {
+    int k = id - TOUCH_ID_JOY;
+    if (hud_area_center(cur_gui(), level, zone, &zone_pos[k][0], &zone_pos[k][1])) {
+        touch(id, 1, zone_pos[k][0], zone_pos[k][1]);
+        zone_held |= 1u << k;
+        l_debug("pad -> toque %d en nivel %d zona %d (%d,%d)", id, level, zone,
+                zone_pos[k][0], zone_pos[k][1]);
+    }
+}
+
+static void zone_up(int id) {
+    int k = id - TOUCH_ID_JOY;
+    if (zone_held & (1u << k)) {
+        touch(id, 0, zone_pos[k][0], zone_pos[k][1]);
+        zone_held &= ~(1u << k);
+    }
+}
+
+static void pad_buttons(unsigned pressed, unsigned released) {
+    uintptr_t gui = cur_gui();
+    int infobox = gui ? *(int *)(gui + 0x1c8) : 0;
+    static int last_infobox;
+
+    if (infobox != last_infobox) {
+        l_info("[hud] cuadro de texto: estado %d tipo %d", infobox, gui ? *(int *)(gui + 0x1f0) : -1);
+        if (infobox && !last_infobox)
+            hud_dump_areas(gui, GUI_INFOBOX);
+        last_infobox = infobox;
+    }
+
+    /* CROSS cierra el cuadro de texto (su ✕) si hay uno abierto; si no, espada. */
+    if (pressed & SCE_CTRL_CROSS) {
+        if (infobox)
+            zone_down(TOUCH_ID_CLOSE, GUI_INFOBOX, ZONE_INFOBOX_OK);
+        else
+            zone_down(TOUCH_ID_SWORD, GUI_HUD, ZONE_SWORD);
+    }
+    if (released & SCE_CTRL_CROSS) {
+        zone_up(TOUCH_ID_CLOSE);
+        zone_up(TOUCH_ID_SWORD);
+    }
+    if (pressed & SCE_CTRL_CIRCLE)
+        zone_down(TOUCH_ID_SHIELD, GUI_HUD, ZONE_SHIELD);
+    if (released & SCE_CTRL_CIRCLE)
+        zone_up(TOUCH_ID_SHIELD);
+    if (pressed & SCE_CTRL_TRIANGLE)
+        zone_down(TOUCH_ID_KILL, GUI_HUD, ZONE_FOCUSED_KILL);
+    if (released & SCE_CTRL_TRIANGLE)
+        zone_up(TOUCH_ID_KILL);
+}
+
+/* Panel frontal -> un puntero por dedo, como HeroOfSparta.onTouchEvent
+ * (tipos 1 = down, 2 = move, 0 = up), en el espacio 1280x752 del motor. */
+static void front_touch(const SceTouchData *t) {
+    static struct { int id, x, y; } prev[SCE_TOUCH_MAX_REPORT];
+    static int nprev;
+    int ncur = t->reportNum < SCE_TOUCH_MAX_REPORT ? t->reportNum : SCE_TOUCH_MAX_REPORT;
+    int cur_id[SCE_TOUCH_MAX_REPORT], cur_x[SCE_TOUCH_MAX_REPORT], cur_y[SCE_TOUCH_MAX_REPORT];
+
+    for (int i = 0; i < ncur; i++) {
+        cur_id[i] = t->report[i].id & 63;
+        cur_x[i] = (int)t->report[i].x * ENGINE_W / 1920;
+        cur_y[i] = (int)t->report[i].y * ENGINE_H / 1088;
+    }
+    for (int p = 0; p < nprev; p++) {
+        int alive = 0;
+        for (int i = 0; i < ncur; i++)
+            alive |= cur_id[i] == prev[p].id;
+        if (!alive) {
+            touch(prev[p].id, 0, prev[p].x, prev[p].y);
+            l_debug("touch UP id=%d (%d,%d)", prev[p].id, prev[p].x, prev[p].y);
+        }
+    }
+    for (int i = 0; i < ncur; i++) {
+        int p = 0;
+        while (p < nprev && prev[p].id != cur_id[i])
+            p++;
+        if (p == nprev) {
+            touch(cur_id[i], 1, cur_x[i], cur_y[i]);
+            l_debug("touch DOWN id=%d (%d,%d)", cur_id[i], cur_x[i], cur_y[i]);
+        } else if (prev[p].x != cur_x[i] || prev[p].y != cur_y[i]) {
+            touch(cur_id[i], 2, cur_x[i], cur_y[i]);
+        }
+    }
+    for (int i = 0; i < ncur; i++) {
+        prev[i].id = cur_id[i];
+        prev[i].x = cur_x[i];
+        prev[i].y = cur_y[i];
+    }
+    nprev = ncur;
 }
 
 /* Cruceta / sticks -> arrastre sobre el joystick virtual. */
@@ -314,8 +392,6 @@ int main() {
     SceCtrlData pad;
     SceTouchData touch;
     unsigned int old_buttons = 0;
-    int finger_down = 0;
-    int last_tx = 0, last_ty = 0;
     int pending_key_down = -1, pending_key_up = -1;
 
     while (1) {
@@ -337,35 +413,9 @@ int main() {
             pending_key_down = AKEYCODE_MENU;
         if (released & SCE_CTRL_START)
             pending_key_up = AKEYCODE_MENU;
-        pad_button(pressed, released, SCE_CTRL_CROSS, TOUCH_ID_SWORD, SWORD_X, SWORD_Y);
-        pad_button(pressed, released, SCE_CTRL_CIRCLE, TOUCH_ID_SHIELD, SHIELD_X, SHIELD_Y);
+        pad_buttons(pressed, released);
         pad_joystick(&pad);
-        pad_kill(pressed, released);
-
-        /* Táctil frontal -> nativeOnTouch(id, tipo, x, y).
-         * Tipos según HeroOfSparta.onTouchEvent: 1 = down, 2 = move, 0 = up.
-         * Siempre slot 0: el motor indexa slots sin validar rango. */
-        if (touch.reportNum > 0) {
-            /* El motor lee el táctil en su espacio 1280x752 (ver glutil.h). */
-            int phys_x = (int)touch.report[0].x * ENGINE_W / 1920;
-            int phys_y = (int)touch.report[0].y * ENGINE_H / 1088;
-            if (!finger_down) {
-                if (nativeOnTouch)
-                    nativeOnTouch(&jni, NULL, 0, 1, phys_x, phys_y);
-                l_debug("touch DOWN (%d,%d)", phys_x, phys_y);
-                finger_down = 1;
-            } else if (phys_x != last_tx || phys_y != last_ty) {
-                if (nativeOnTouch)
-                    nativeOnTouch(&jni, NULL, 0, 2, phys_x, phys_y);
-            }
-            last_tx = phys_x;
-            last_ty = phys_y;
-        } else if (finger_down) {
-            if (nativeOnTouch)
-                nativeOnTouch(&jni, NULL, 0, 0, last_tx, last_ty);
-            l_debug("touch UP (%d,%d)", last_tx, last_ty);
-            finger_down = 0;
-        }
+        front_touch(&touch);
 
         if (pending_key_down != -1 && nativeKeyDown) {
             nativeKeyDown(&jni, NULL, pending_key_down);

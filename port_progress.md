@@ -302,3 +302,19 @@ Log traído de consola (`logs/heroofsparta_001.log`, 43 líneas). Hallazgos:
   TRIANGLE → toque en el centro de la zona 12 leída en vivo (`hud_area_center`, patch.c).
   Log `[hud] zona N: (x,y) WxH tecla K` lista todas las zonas táctiles del HUD (para
   mapear saltar y verificar espada/escudo).
+
+## Bug #5 (2026-10-10, log 011): atascada en el cuadro "green crystal"; HUD visible otra vez
+- Log de zonas táctiles nivel 3: 0 (-1000,-1000) tecla 24 (saltar, fuera de pantalla),
+  1 (1176,42), 2 (914,435) 132x125 tecla 25 = focused kill, 3 (15,137) = templo,
+  4 (955,580) tecla 0 = escudo, 5 (260,147) 753x584 = área central, 6 (1060,430)
+  tecla 16 = espada, 7 (10,415) 250x250 = joystick, 68 = área de diálogo.
+  El ítem 12 que usaba TRIANGLE NO es zona táctil → TRIANGLE no hacía nada.
+- Cuadro de texto: `GameGUI::UpdateInfoBox` cierra según estado (+0x1c8) / tipo (+0x1f0):
+  por tap-release en zona 0 del nivel GUI 13 (CheckActions 0x10/0x20, cualquier slot),
+  por tiempo, o por una condición del jugador (tipo 5: MC+0x260, tipo 6: estado 0x3a).
+- Cambios (pedido del usuario): fuera el HUD al 1% (sin hooks PaintGraphItem/
+  RenderJoystick). Pad por zonas reales leídas en vivo (`hud_area_center(gui, nivel,
+  zona)`): CROSS = espada (zona 6) o, con cuadro abierto, su ✕ (nivel 13 zona 0);
+  CIRCLE = escudo (4); TRIANGLE = focused kill (2). Toques sintéticos con IDs 100+.
+  Panel frontal multitáctil real: un puntero por dedo (id & 63), down/move/up como
+  `onTouchEvent`. Log `[hud] cuadro de texto: estado E tipo T` + zonas del nivel 13.
