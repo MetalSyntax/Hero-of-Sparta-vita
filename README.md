@@ -88,6 +88,16 @@ hardcoded coordinates — the pad taps wherever the engine's buttons actually ar
 
 ### ⚠️ Known Issues
 
+> **Note:** the **physical-buttons issue below is currently the only tracked
+> issue**, and it is being actively worked on. There are no other open issues
+> for v1.0.
+
+- **Physical buttons (only tracked issue, WIP)**: the pad injects synthetic
+  touches onto the HUD touch zones, read live from the engine (no hardcoded
+  coordinates). If a button ever seems to miss, the Debug log
+  (`pad -> toque ... en nivel ... zona ...`) shows exactly where the synthetic
+  tap landed.
+
 - The intro video (`intro.vdo`) is skipped instead of played; if the engine ever blocks on
   it, the log will show it.
 - The virtual HUD controls are drawn at full opacity (there is no faded-controls mode:

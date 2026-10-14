@@ -318,3 +318,22 @@ Log traído de consola (`logs/heroofsparta_001.log`, 43 líneas). Hallazgos:
   CIRCLE = escudo (4); TRIANGLE = focused kill (2). Toques sintéticos con IDs 100+.
   Panel frontal multitáctil real: un puntero por dedo (id & 63), down/move/up como
   `onTouchEvent`. Log `[hud] cuadro de texto: estado E tipo T` + zonas del nivel 13.
+
+## Release v1.0 (2026-10-13): performance, saves verificados, VPK publicable
+- **Performance (cambio real en código):** `fread_soloader` (`source/reimpl/io.c`)
+  ya no mide tiempo con `sceKernelGetProcessTimeLow` en Release (guard con
+  `#ifdef DEBUG_SOLOADER`; el contador `g_io_ops` del watchdog sigue siempre).
+  Verificado en el eboot Release: 0 ocurrencias de strings de debug
+  (`cargado`, `fopen redirect`, warnings del watchdog) — `l_debug/l_info/l_warn`
+  compilan a cero, así que jugar = sin log por frame. Base ya existente: 30 FPS
+  fijos (`vsync_interval=2`), PVRTC nativo a GPU, relojes al máximo (444/222/222),
+  SFX precargados + música en streaming, vitaGL 12 MB sin MSAA + DRAW_SPEEDHACK=2.
+- **Saves verificados ✔:** `io.c` redirige `/data/data/<paquete>/*.dat` → `saves/`
+  (creada al arrancar por el logger + por el deploy); `fwrite/fclose` por
+  SceLibcBridge. Log 011 confirma lecturas (`Spartan.dat`, `Setting.dat` en `rb`)
+  y escrituras OK (`Spartan0.dat` + `Spartan.dat` en `wb`, `fopen` non-null +
+  `fclose` 0, sin `fopen(...): (nil)`). Progreso persiste entre sesiones.
+- **Release:** `psvita-toolkit build --preset release` OK → `build/heroofsparta.vpk`
+  (1.1 MB, `PORT_TRACE=OFF`). Notas de publicación en `RELEASE_v1.0.md`.
+- **Issues:** se declara que el **único issue considerado es el de los botones
+  físicos (WIP)** — README y release notes actualizados en ese sentido.

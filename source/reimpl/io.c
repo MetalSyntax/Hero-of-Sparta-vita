@@ -188,7 +188,9 @@ int close_soloader(int fd) {
  * lenta de ux0 vs parseo pesado dentro del motor. Solo las lecturas >200ms
  * suben a warning (siempre visible). */
 size_t fread_soloader(void *ptr, size_t size, size_t count, FILE *stream) {
+#ifdef DEBUG_SOLOADER
     uint32_t t0 = sceKernelGetProcessTimeLow();
+#endif
     size_t ret;
     extern volatile unsigned g_io_ops;
 #ifdef USE_SCELIBC_IO
@@ -197,6 +199,7 @@ size_t fread_soloader(void *ptr, size_t size, size_t count, FILE *stream) {
     ret = fread(ptr, size, count, stream);
 #endif
     g_io_ops++;
+#ifdef DEBUG_SOLOADER
     {
         uint32_t dt = sceKernelGetProcessTimeLow() - t0;
         size_t bytes = ret * size;
@@ -205,6 +208,7 @@ size_t fread_soloader(void *ptr, size_t size, size_t count, FILE *stream) {
             l_warn("[io] fread lento: %u bytes en %ums (%p)", (unsigned)bytes,
                    (unsigned)(dt / 1000), stream);
     }
+#endif
     return ret;
 }
 
